@@ -1,1 +1,0 @@
-"""CAN SLIM screening engine."""

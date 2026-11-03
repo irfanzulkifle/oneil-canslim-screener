@@ -1,179 +1,153 @@
 # Screening rules
 
-What a stock must do to appear in this screener, and what it must do to survive
-to the final lineup. Every number here is a constant in `src/`, not prose that
-drifted away from the code.
-
-The screen runs in three stages. Each stage is cheap-then-expensive: a batched
-fundamental query over thousands of tickers, then an expensive per-ticker chart
-audit over the few hundred that survive, then ranking.
+Every rule a stock must satisfy to appear in this screen, and every rule it must
+satisfy to survive to the end. The numbers are constants in
+[`oneil/rules.py`](../oneil/rules.py); this document explains them, and the code
+enforces them. When the two disagree, the code is right and this file is a bug.
 
 ```
-universe filter        ~12,000 US stocks  →  ~500
+universe filter      stocks only · cap ≥ $300M · top 500 by volume
    ↓
-CAN SLIM screen        6 factors, pass ≥4  →  ~100
+weekly O'Neil gate   close > 10W SMA · close > 30W SMA · weekly RSI(7) > 60
    ↓
-chart audit            5 checks, 0–5 score →  ~15–40
+CAN SLIM screen      C/A/N/L/I/M, pass ≥ 3 (≥ 4 in the daily batch)
    ↓
-rank + sector tilt                          →  final lineup
+chart audit          5 checks, 0–5, only on survivors
+   ↓
+rank                 screen 60% + chart 40% + sector tilt, ceiling 6.1
+   ↓
+deploy gate          market-level: VIX, 10Y shock. Separate from any stock.
 ```
+
+Each stage is more expensive than the last, so the cheap batched filters run
+first and the per-ticker work runs on the few hundred that survive.
 
 ---
 
 ## Stage 0 — Universe
 
-Applied inside the TradingView screener query, before any scoring.
+Applied in the vendor query, before any scoring.
 
 | Filter | Value | Why |
 |---|---|---|
-| Market capitalisation | ≥ $300,000,000 | Below this, spreads widen and a single order moves the price. The chart audit's volume checks also stop being meaningful. |
-| Instrument type | `stock` | Excludes ETFs, funds, and trusts. A sector ETF passing CAN SLIM tells you nothing about a tradeable company. |
-| Order | Volume, descending | The scan returns a bounded slice. Ranking by liquidity first means the slice is the tradeable part of the market, not an arbitrary alphabetical cut. |
-| Slice size | 500 per market | Free-tier call budget. A larger slice does not improve the lineup, because the chart audit is capped anyway. |
-| Markets | `america` (~12,000), `malaysia` (~1,100) | Two separate taxonomies; Bursa is screened with the same rules but a different universe call. |
+| Market capitalisation | ≥ $300,000,000 | Below this, spreads widen and one order moves the price. The volume checks also stop being meaningful. |
+| Instrument type | `stock` | Excludes ETFs, funds and trusts. A sector ETF passing CAN SLIM says nothing about a tradeable company. |
+| Order | Volume, descending | The scan returns a bounded slice. Ranking by liquidity first makes the slice the tradeable part of the market, not an alphabetical cut. |
+| Slice size | 500 per market (300 weekly) | Free-tier call budget. The chart audit is capped anyway, so a larger slice does not improve the lineup. |
+| Markets | US (~12,000 listed), Bursa (~1,100) | Two taxonomies, same rules, different universe call. |
+
+In the production database the tradeable US universe is 7,612 tickers with a
+known market cap.
 
 ---
 
-## Stage 1 — The CAN SLIM screen
+## Stage 1 — The weekly gate (what gets a stock *seen*)
 
-Six factors. Each factor contributes a **pass flag** and a **0–2 score**.
+This is the stage that most screeners do not have, and the reason the output is
+short. It runs in a single batched query and asks nothing about the business:
+**is this stock going up?**
 
-A stock must pass **at least 4 of the 6** to remain. That majority rule is
-deliberate: see "Why a majority, not a veto" below.
+| Condition | Value | Notes |
+|---|---|---|
+| Close > 10-week SMA | strict `>` | Short-term trend |
+| Close > 30-week SMA | strict `>` | Intermediate trend |
+| Weekly RSI(7) | **> 60** | Momentum on weekly bars, so one noisy session cannot flip it |
+| Market cap | ≥ $1,000,000,000 | Higher than the daily floor: this list feeds trade candidates |
+| Instrument | `stock` | As above |
 
-### C — Current quarterly earnings
+On 2026-11-03 this returned **113 US names and 28 Malaysian** names from the
+7,612-ticker universe.
 
-| | |
-|---|---|
-| **Rule** | Quarterly diluted EPS, year-over-year growth **> 25%** |
-| **Field** | `earnings_per_share_diluted_yoy_growth_fq` |
-| **Score** | `clip(growth, -100, 500) / 50`, capped 0–2 |
-| **Missing data** | Treated as fail (`-999`), never as pass |
-
-The single strongest signal O'Neil used: the most recent reported quarter
-accelerating. 25% is the canonical floor. The clip at 500% prevents one
-distorted quarter from dwarfing every other factor in the total.
-
-### A — Annual earnings
-
-| | |
-|---|---|
-| **Rule** | Annual diluted EPS, year-over-year growth **> 25%** |
-| **Field** | `earnings_per_share_diluted_yoy_growth_fy` |
-| **Score** | `clip(growth, -100, 200) / 50`, capped 0–2 |
-| **Bonus** | **+0.5** when 5-year EPS CAGR > 25% |
-| **Missing data** | Treated as fail |
-
-One good quarter can be a cost cut or a one-off contract. Three years of
-compounding growth is much harder to fake, so annual growth is scored
-separately rather than folded into C.
-
-### N — New
-
-| | |
-|---|---|
-| **Rule** | Price **within 15%** of the 52-week high |
-| **Field** | `(close - price_52_week_high) / price_52_week_high × 100` |
-| **Threshold** | `pct_from_52w_high ≥ -15` |
-| **Score** | `((100 + pct_from_52w_high) / 20)`, capped 0–2 |
-
-**This is a proxy, and worth being blunt about it.** O'Neil's N means a new
-product, new management, new industry condition. A data feed cannot tell you
-that. What it *can* tell you is that there is no trapped supply overhead — a
-stock near its high has nobody sitting on a loss waiting to sell into strength.
-That is the tradeable half of the idea.
-
-### L — Leader
-
-| | |
-|---|---|
-| **Rule** | Close **above the 200-day SMA** |
-| **Score** | `(pct_above_sma200 / 20) + 1`, capped 0–2 |
-| **Bonus** | **+0.3** if close > SMA50 · **+0.2** if RSI between 50 and 80 |
-
-Filters out laggards in long-term downtrends. The RSI band is deliberately
-two-sided: below 50 is weak, above 80 is extended and prone to a shakeout.
-
-### I — Institutional sponsorship
-
-| | |
-|---|---|
-| **Rule** | Analyst recommendation mark **> 0.1** (scale −1.0 sell … +1.0 buy) |
-| **Field** | `recommendation_mark` |
-| **Score** | `(mark + 1) / 2 × 2`, capped 0–2 |
-| **Bonus** | **+0.3** when more than 50% of analysts rate buy |
-| **Missing data** | Treated as fail |
-
-**The weakest factor in the model, and it earns no veto.** O'Neil's I means
-13F filings — real institutional accumulation. A batch screener has no cheap
-access to that, so analyst sentiment stands in as a proxy. It is correlated
-with institutional interest but it is not the same measurement, and treating it
-as a veto would reject good companies that analysts simply do not cover.
-
-### M — Market direction
-
-| | |
-|---|---|
-| **Rule** | 10-day relative volume **> 1.0** |
-| **Field** | `relative_volume_10d_calc` |
-| **Score** | `clip(rel_volume, 0, 3)` |
-| **Bonus** | **+0.3** when the day is up **and** relative volume > 1.2 |
-
-Per-stock only. Above-average volume is treated as evidence of accumulation.
-Genuine market direction — index trend, distribution days — is a separate
-portfolio-level input in the full system, not something this screen can infer
-from one ticker.
-
-### Aggregate
-
-```
-canslim_total  = C + A + N + L + I + M       (score, used for ordering)
-canslim_passes = count(pass flags)           (0–6, used as the gate)
-```
+Deliberate consequence: weekly RSI 91 passes. The gate is a trend question, not
+a valuation question. Extension is handled where it belongs, by the L factor's
+55–85 score band and by the VCP check in the chart audit.
 
 ---
 
-## Stage 2 — Chart audit
+## Stage 2 — CAN SLIM (what makes a stock *pass*)
 
-Runs **only** on Stage 1 survivors, because it needs a year of daily OHLCV per
-ticker and that is the expensive part of any free data tier. Five checks, one
-point each, **0–5**.
+Six factors. Each contributes a pass flag and a 0–2 score.
 
-| # | Check | Threshold | What it is really asking |
+| Factor | Pass rule | Score | Bonus |
 |---|---|---|---|
-| 1 | Moving averages stacked | SMA20 > SMA50 > SMA200 | Is the trend ordered across all horizons, or is it a bounce inside a downtrend? |
-| 2 | RS line at a 3-month high | current RS ≥ 99% of the 63-day max | Is the stock beating the index *now*? |
-| 3 | Volume dry-up (VDU) | 3-day average volume < **60%** of the 50-day baseline | Is supply actually shrinking while the base forms? |
-| 4 | Volatility contraction (VCP) | last 5-day range < **50%** of the prior 20-day range | Is the base tightening toward a pivot? |
-| 5 | 3-month excess return | stock 3M − benchmark 3M > 0 | Is there positive relative performance to trade? |
+| C | quarterly EPS YoY **> 25%** | `clip(g, −100, 500) / 50`, capped 0–2 | — |
+| A | annual EPS YoY **> 25%** | `clip(g, −100, 200) / 50`, capped 0–2 | +0.5 if 5Y CAGR > 25% |
+| N | within **15%** of the 52-week high | `(100 + pct_from_high) / 20`, capped 0–2 | — |
+| L | close **> SMA200** | `pct_above_sma200 / 20 + 1`, capped 0–2 | +0.3 if > SMA50 · +0.2 if RSI 50–80 |
+| I | analyst mark **> 0.1** (scale −1…+1) | `(mark + 1) / 2 × 2`, capped 0–2 | +0.3 if > 50% buy ratings |
+| M | 10-day relative volume **> 1.0** | `clip(rel_vol, 0, 3)` | +0.3 if up day and rel_vol > 1.2 |
 
-**Unknown is not zero.** If a ticker lacks enough bars, `audit()` returns
-`None` and the name is recorded as unaudited. Scoring a data gap as a bad chart
-is how a pipeline quietly starts rejecting good stocks.
+```
+canslim_total  = C + A + N + L + I + M      (score, used for ordering)
+canslim_passes = count(pass flags)          (0–6, used as the gate)
+```
 
-**Bursa caveat, stated rather than hidden:** the chart audit returns a static
-3/5 for Bursa because free daily OHLCV for `.KL` names is not reliably
-available. Bursa candidates are therefore ranked on fundamentals plus sector
-tilt, not on their chart. If you are reading a Bursa lineup, do not read the
-chart score as a measurement.
+**Missing data fails a factor.** A null EPS growth is not unknown-but-promising;
+it is a company whose numbers could not be verified, and it does not get the
+benefit of the doubt.
+
+### Why a majority, not a veto
+
+A single-factor veto makes a screen brittle in a specific way: a company with
+25% earnings growth that sits 16% off its high is not a bad business, it is a
+stock that has not set up yet. Vetoing it means the screen only ever shows names
+that are already extended, which is the worst time to buy them.
+
+Requiring 3 of 6 (and 4 of 6 in the stricter daily batch) keeps the spirit of the
+model, most of it must be true, while letting the ranker sort quality afterwards.
+The pass count is stored, so the bar can be tightened without touching the
+scoring code.
+
+### The two weak factors, named
+
+**I is analyst sentiment, not institutional ownership.** O'Neil's I means 13F
+accumulation. A batch screen has no cheap access to that, so the analyst
+recommendation mark stands in. It correlates with institutional interest; it is
+not the same measurement. It is the weakest factor in the model and it is
+exactly why the pass bar is a majority rather than a veto.
+
+**N is price proximity, not news.** O'Neil's N means a new product, a new
+management team, a new industry condition. A data feed cannot see any of that.
+What it can measure is that there is no trapped supply overhead: a stock near its
+high has nobody sitting on a loss waiting to sell into strength. That is the
+tradeable half of the idea, and it is the half that is used.
 
 ---
 
-## Stage 3 — Ranking
+## Stage 3 — Chart audit (0–5)
 
-Both gate scores are different units, so they are blended, not summed:
+Runs only on survivors. Five checks, one point each. Too few bars returns
+`None`, and the name is recorded as **unaudited**, never scored as zero.
+
+| # | Check | Threshold | What it is asking |
+|---|---|---|---|
+| 1 | Moving averages stacked | SMA20 > SMA50 > SMA200 | Is the trend ordered across horizons, or is this a bounce inside a downtrend? |
+| 2 | RS line at a 3-month high | current ratio ≥ **99%** of the 63-day max | Is the stock beating the index now? |
+| 3 | Volume dry-up | 3-day average < **60%** of the prior 50-day | Is supply shrinking while the base forms? |
+| 4 | Volatility contraction | last 5-day range < **50%** of the prior 20-day | Is the base tightening toward a pivot? |
+| 5 | 3-month excess return | stock 3M − benchmark 3M **> 0** | Is there relative performance to trade? |
+
+Checks 1–4 are computed on daily bars and expressed as percentages of price so
+they compare across names at different price levels. Check 2 uses the ratio of
+stock to benchmark, not the stock's own price, so a stock can score here while
+still below its own high.
+
+---
+
+## Stage 4 — Ranking
+
+The two gate scores are different units (0–6 and 0–5), so they are blended, not
+summed:
 
 ```
-final_rank = screener_score × 0.60 + chart_score × 0.40
+final_rank = screener_score × 0.60 + chart_score × 0.40 + sector tilt
 ```
 
 Fundamentals carry the larger weight because a good chart on a deteriorating
 business is the more common way to lose money. The chart is the timing input,
 not the thesis.
 
-### Sector tilt (M factor at portfolio level)
-
-Reads the latest sector relative-strength ranking and adjusts `final_rank`:
+### Sector tilt (M at portfolio level)
 
 | Sector RS rank | Adjustment |
 |---|---|
@@ -182,41 +156,79 @@ Reads the latest sector relative-strength ranking and adjusts `final_rank`:
 | 7–10 | no change |
 | 11+ | **−0.3** |
 
-Sector labels from the data feed are mapped onto the ranking taxonomy through
-an alias table, then an industry-keyword fallback.
+No sector table means no tilt at all, not a zero tilt applied to everything.
+"No ranking" and "ranked last" are different claims; collapsing them would push
+every name into the penalty bucket on a day the sector table failed to load.
 
-If no sector table exists, the tilt is **skipped entirely** — not defaulted to
-zero. "No ranking available" and "ranked last" are different claims, and
-collapsing them would silently push every name into the penalty bucket.
+### The ceiling
+
+```
+6 × 0.60 + 5 × 0.40 + 0.5 = 6.1
+```
+
+This is the arithmetic maximum of the rank, and it is asserted in the tests.
+A threshold above the maximum is not a strict filter, it is an outage: the
+screen returns nothing for months and every downstream report looks calm. In
+2026 the production system had a `final_rank ≥ 7.0` gate against a formula whose
+ceiling is 6.1; it produced 68 consecutive HOLD decisions and zero trades before
+anyone traced why. `rank_is_reachable()` exists so that mistake cannot come back
+silently.
 
 ---
 
-## Why a majority, not a veto
+## Stage 5 — Deploy gate (market-level)
 
-A single-factor veto makes the screen brittle in a specific way: a company with
-25%+ EPS growth that happens to sit 16% off its high is not a bad business, it
-is a stock that has not set up yet. Vetoing it means the screener only ever
-shows you names that are already extended.
+A ranked candidate is not permission to trade. This gate answers a different
+question: **is today a day to buy anything?**
 
-Requiring 4 of 6 keeps the spirit of the model — most of it must be true — while
-letting the ranker sort quality afterwards. The pass count is also stored, so
-you can tighten to 5 or 6 yourself without touching the scoring code.
+| Leg | Rule | Effect |
+|---|---|---|
+| VIX | ≤ 20 | Above 20: halt |
+| 10Y rate shock | no rise ≥ **25bp** over 10 sessions | Shock: halt |
+| 10Y level | > 4.60% | High but stable: half position size, not a ban |
+| Missing data in any leg | — | No verdict. A blank leg is not a pass |
+
+The 10Y rule is a shock detector, not a level ban, and that distinction cost 76
+trading days to learn. A level-based version ("halt while 10Y > 4.80%") stayed
+on through a market that was making higher highs, because the level never came
+back down. A rate *shock* is what flushes growth names; a repriced level that
+stops moving is not a risk event, it is the new normal.
+
+---
+
+## Boundaries, exactly
+
+Thresholds are tested from both sides, because an off-by-one is invisible in a
+lineup and only shows up months later as "why did this never appear".
+
+| Rule | Fails | Passes |
+|---|---|---|
+| C / A EPS growth | 25.0% | 25.1% |
+| N distance from high | −15.1% | −15.0% |
+| Weekly RSI gate | 60.0 | 60.1 |
+| Weekly L score band | 54.9 or 85.1 | 55.0 … 85.0 |
+| M relative volume | 1.00 | 1.01 |
+| VDU ratio | 0.60 | 0.59 |
+| VCP contraction | 0.50 | 0.49 |
+| Rank floor | 3.99 | 4.00 |
+
+Missing values always land on the failing side.
 
 ---
 
 ## Freshness — refusing stale screens
 
-A screen built from a scan older than **3 days** is refused rather than used.
-The table records the scan date, so this is checkable rather than assumed:
+A screen built from a scan older than **3 days** is refused, not used. The
+table records the scan date, so this is checkable rather than assumed.
 
 | Condition | Behaviour |
 |---|---|
 | Newest scan is today | proceed |
 | Newest scan is 1–3 days old | proceed, loudly logged |
-| Newest scan is > 3 days old | refuse — return nothing |
+| Newest scan is > 3 days old | refuse, return nothing |
 | No rows at all | refuse |
 
-Reason: the chart audit is measured against today's price. Screening yesterday's
+The chart audit is measured against today's price. Screening last week's
 fundamentals against today's chart produces a lineup that was never testable.
 
 ---
@@ -228,4 +240,6 @@ fundamentals against today's chart produces a lineup that was never testable.
 - The N factor is price proximity, not news.
 - The M factor is per-stock volume, not market direction.
 - Bursa chart scores are a placeholder, not a measurement.
+- It has no backtest. The criteria are O'Neil's and the calibrations are mine;
+  the evidence is a live track record, not a study.
 - A passing score is a reason to look at a chart, not a reason to buy.

@@ -35,6 +35,19 @@ RSI7_WEEKLY_SCORE_BAND = (55.0, 85.0)   # L: trend, not exhaustion
 NEAR_HIGH_MAX_DRAWDOWN = -10.0     # N: within 10% of the 52-week high
 REL_VOLUME_MIN = 1.0               # M: at least average volume
 
+# --- Stage 3b: DAILY CAN SLIM screen ----------------------------------------
+# The daily screen and the weekly screen are separate systems with separate
+# thresholds, and the N factor is the one place they legitimately differ:
+# the weekly candidate list is the trade list, so it demands a tighter base
+# (within 10%); the daily screen is a wider net that also feeds the weekly, so
+# it tolerates 15%. Do not collapse these into one number — they answer
+# different questions and a shared constant would silently change one of them.
+DAILY_NEAR_HIGH_MAX_DRAWDOWN = -15.0   # N: within 15% of the 52-week high
+ANALYST_MARK_MIN = 0.1             # I: analyst mark above this counts as backing
+MIN_SCREENER_PASSES = 3            # pipeline floor; the live daily scan keeps >= 4
+ANALYST_BUY_SHARE_BONUS = 0.5      # more than half of analysts rating buy
+REL_VOLUME_SURGE_BONUS = 1.2       # up day on this multiple earns M bonus
+
 # --- Stage 4: chart audit (daily bars) --------------------------------------
 SMA_WINDOWS = (20, 50, 200)        # alignment: 20 > 50 > 200
 RS_LINE_LOOKBACK = 63              # ~3 months of sessions

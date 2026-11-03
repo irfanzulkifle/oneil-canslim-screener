@@ -61,10 +61,7 @@ def gate(row: Mapping[str, float]) -> bool:
         return False
     if not (sma10w > 0 and sma30w > 0):
         return False
-    return close > sma10w and close > sma30w and rsi > RSI7_WEEKLY_MIN
-
-
-RSI7_WEEKLY_MIN = rules.RSI7_WEEKLY_MIN
+    return close > sma10w and close > sma30w and rsi > rules.RSI7_WEEKLY_MIN
 
 
 def score(row: Mapping[str, float]) -> WeeklyScore:

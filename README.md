@@ -24,12 +24,12 @@ rather than smoothed over. A screen you cannot audit is a rumour.
 The production screen runs daily and is published at
 **[TITAN CAN SLIM Dashboard](https://oneilscreener.duckdns.org)**.
 
-Be clear about which numbers are which. Every number produced by this repository
-is **synthetic demo data**: `oneil/synthetic.py` generates deterministic bars
-locally, so the tests and `run_demo.py` need no network and no vendor feed. The
-dashboard is a separate deployment and runs on **real market data**. A rank you
-see there cannot be reproduced from the demo universe here, and a rank produced
-here is not a market observation.
+Be clear about which numbers are which. Every number produced by running the
+code in this repository is **synthetic demo data**: `oneil/synthetic.py`
+generates deterministic bars locally, so the tests and `run_demo.py` need no
+network and no vendor feed. The dashboard is a separate deployment and runs on
+**real market data**. A rank you see there cannot be reproduced from the demo
+universe here, and a rank produced here is not a market observation.
 
 ---
 

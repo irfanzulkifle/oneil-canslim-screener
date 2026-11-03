@@ -96,7 +96,7 @@ a valuation question. Extension is handled where it belongs, by the L factor's
 
 ## Stage 2 — CAN SLIM (what makes a stock *pass*)
 
-Six factors. Each contributes a pass flag and a 0–2 score.
+Six factors. Each contributes a pass flag and a base score of 0–2; bonuses lift the real ceilings to A 2.5, L 2.5, I 2.3 and M 3.3, so the total can reach 14.6. The total is diagnostic — the rank consumes the integer pass count, not this number.
 
 | Factor | Pass rule | Score | Bonus |
 |---|---|---|---|

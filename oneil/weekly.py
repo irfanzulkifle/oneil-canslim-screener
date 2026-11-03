@@ -30,7 +30,7 @@ class WeeklyScore:
     m_score: float
     pct_above_10w: float
     pct_above_30w: float
-    pct_from_52w_high: float
+    pct_from_52w_high: float | None
     w_total: float
     w_passes: int
 
@@ -57,7 +57,10 @@ def gate(row: Mapping[str, float]) -> bool:
     rsi = _num(row, "rsi7w")
     mcap = _num(row, "market_cap")
 
-    if mcap and mcap < rules.WEEKLY_MIN_MCAP:
+    # A missing market cap must fail, not skip the leg. `if mcap and ...` let a
+    # 0.0 default through, so a row with no market cap at all cleared the $1B
+    # floor and the gate returned True.
+    if mcap <= 0 or mcap < rules.WEEKLY_MIN_MCAP:
         return False
     if not (sma10w > 0 and sma30w > 0):
         return False
@@ -75,7 +78,10 @@ def score(row: Mapping[str, float]) -> WeeklyScore:
     sma10w = _num(row, "sma10w")
     sma30w = _num(row, "sma30w")
     rsi = _num(row, "rsi7w", 50.0)
-    high52 = _num(row, "high_52w", close)
+    # No default to `close`: that made pct_from_52w exactly 0.0, which passes
+    # N, so a stock with no 52-week-high data scored full marks. Missing data
+    # must fail the factor - the promise the README makes.
+    high52 = _num(row, "high_52w", 0.0)
     rel_vol = _num(row, "rel_vol_w", 0.0)
 
     eps_q = row.get("eps_q_yoy")
@@ -85,7 +91,7 @@ def score(row: Mapping[str, float]) -> WeeklyScore:
 
     pct_above_10w = (close / sma10w - 1) * 100 if sma10w > 0 else 0.0
     pct_above_30w = (close / sma30w - 1) * 100 if sma30w > 0 else 0.0
-    pct_from_52w = (close - high52) / high52 * 100 if high52 > 0 else 0.0
+    pct_from_52w = (close - high52) / high52 * 100 if high52 > 0 else None
 
     low_band, high_band = rules.RSI7_WEEKLY_SCORE_BAND
     l_pass = (
@@ -100,7 +106,7 @@ def score(row: Mapping[str, float]) -> WeeklyScore:
     a_pass = eps_a_f > rules.EPS_GROWTH_MIN_PCT
     a_score = max(-100.0, min(200.0, eps_a_f if eps_a is not None else 0.0)) / 50
 
-    n_pass = pct_from_52w >= rules.NEAR_HIGH_MAX_DRAWDOWN
+    n_pass = pct_from_52w is not None and pct_from_52w >= rules.NEAR_HIGH_MAX_DRAWDOWN
 
     m_pass = rel_vol > rules.REL_VOLUME_MIN
     m_score = max(0.0, min(3.0, rel_vol))
@@ -120,7 +126,7 @@ def score(row: Mapping[str, float]) -> WeeklyScore:
         c_score=round(c_score, 3), a_score=round(a_score, 3), m_score=round(m_score, 3),
         pct_above_10w=round(pct_above_10w, 2),
         pct_above_30w=round(pct_above_30w, 2),
-        pct_from_52w_high=round(pct_from_52w, 2),
+        pct_from_52w_high=None if pct_from_52w is None else round(pct_from_52w, 2),
         w_total=round(w_total, 3),
         w_passes=passes,
     )

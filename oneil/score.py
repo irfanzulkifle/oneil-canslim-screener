@@ -3,7 +3,9 @@
 Three things happen here, in this order, and they answer different questions:
 
   canslim_factors()  how many of C/A/N/L/I/M does the stock pass, and how
-                     strongly (score 0-12)?
+                     strongly? The total runs 0 to 14.6 (bonuses push past the
+                     per-factor base), and is recorded for diagnostics only:
+                     the rank uses the integer pass count, not this total.
   final_rank()       of the survivors, which are worth looking at first
                      (0.6 x screen + 0.4 x chart + sector boost, max 6.1)?
   deploy_gate()      is today a day to buy anything at all (market regime)?

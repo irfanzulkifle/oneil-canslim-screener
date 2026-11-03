@@ -107,3 +107,29 @@ def test_blank_leg_is_not_a_pass():
     state = score.deploy_gate([], vix=None)
     assert state.can_deploy is False
     assert state.tier == "NO_DATA"
+
+
+def test_max_total_is_documented_ceiling():
+    """Pin the real maximum so the docstring cannot drift back to 0-12.
+
+    Bonuses push past the per-factor base: A 2.5, L 2.5, I 2.3, M 3.3.
+    """
+    mx = {
+        "eps_q_yoy": 500, "eps_a_yoy": 200, "eps_5y_cagr": 99,
+        "close": 100.0, "high_52w": 100.0, "sma200": 1.0, "sma50": 1.0,
+        "rsi": 60, "rec_mark": 1.0, "pct_buy": 0.9, "rel_vol": 3.0, "change": 1.0,
+    }
+    assert score.canslim_factors(mx).total == 14.6
+
+
+def test_rank_consumes_pass_count_not_total():
+    """The 14.6 total never reaches the rank; only the integer passes do."""
+    from oneil import pipeline
+    mx = {
+        "eps_q_yoy": 500, "eps_a_yoy": 200, "eps_5y_cagr": 99,
+        "close": 100.0, "high_52w": 100.0, "sma200": 1.0, "sma50": 1.0,
+        "rsi": 60, "rec_mark": 1.0, "pct_buy": 0.9, "rel_vol": 3.0, "change": 1.0,
+    }
+    f = score.canslim_factors(mx)
+    assert f.total == 14.6 and f.passes == 6
+    assert score.final_rank(f.passes, 5, 1) == rules.FINAL_RANK_CEILING

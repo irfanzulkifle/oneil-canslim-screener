@@ -60,3 +60,33 @@ def test_rsi_band_is_a_score_not_a_gate():
     s = weekly.score(row(rsi7w=90.0))
     assert s.l_pass is False
     assert s.w_passes == 4
+
+
+def test_missing_52w_high_fails_n():
+    """No 52-week high must fail N, not default to today's close.
+
+    The old default made pct_from_52w exactly 0.0, so a stock with no high data
+    scored a perfect 5/5 - the precise failure the README promises cannot happen.
+    """
+    r = row()
+    del r["high_52w"]
+    s = weekly.score(r)
+    assert s.n_pass is False
+    assert s.pct_from_52w_high is None
+    assert s.w_passes == 4
+
+
+def test_zero_52w_high_fails_n():
+    assert weekly.score(row(high_52w=0.0)).n_pass is False
+
+
+def test_missing_market_cap_fails_gate():
+    """A blank cap is not a pass: the old `if mcap and ...` let 0.0 through."""
+    r = row()
+    del r["market_cap"]
+    assert weekly.gate(r) is False
+
+
+def test_negative_market_cap_fails_gate():
+    assert weekly.gate(row(market_cap=-1.0)) is False
+

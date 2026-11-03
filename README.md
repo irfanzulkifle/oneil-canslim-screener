@@ -31,6 +31,12 @@ rather than smoothed over. A screen you cannot audit is a rumour.
 | 4. Chart audit | Is the chart set up today? | 5 checks, 1 point each | capped at 15 per run (rate-limit budget) |
 | 5. Rank | Which first? | `screen × 0.6 + chart × 0.4 + sector tilt` ≥ 4.0 | 15 stored, top 4.7 |
 
+The "capped 0–2" in that table is the *base* formula. Bonuses lift the real
+per-factor ceilings to A 2.5, L 2.5, I 2.3 and M 3.3, so the total can reach
+14.6 — and none of it feeds the rank. `pipeline.screen()` calls
+`score.final_rank(factors.passes, ...)`, an integer 0–6. The total is a
+diagnostic; the pass count is the decision.
+
 Two different senses of "pass" are deliberately kept apart. **Being seen** is the
 weekly gate: trend and momentum, no fundamentals. **Passing** is the scored
 screen: at least three of six CAN SLIM factors, then a chart score. A stock can
@@ -201,7 +207,11 @@ the part that matters.
 
 ---
 
-## What it refuses to do
+## What the production system this came from refuses to do
+
+These rules live in the operational system, not in this library — this
+repository is the rule core and holds no data layer, so nothing here can check a
+scan's age. Stated so a reader does not look for the code:
 
 - **Stale scans are refused, not used.** A scan older than 3 days returns
   nothing; a deployment older than 30 hours is refused separately.

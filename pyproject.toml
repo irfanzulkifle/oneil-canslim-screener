@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oneil-canslim-screener"
+dynamic = ["version"]
+description = "Five-stage CAN SLIM screen: weekly trend gate, C/A/N/L/I/M scoring, chart audit, weighted rank, market deploy gate."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Irfan Zulkifle" }]
+keywords = ["can-slim", "stock-screener", "quantitative-finance", "technical-analysis"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+oneil = "oneil.cli:main"
+
+[project.urls]
+Homepage = "https://oneilscreener.duckdns.org"
+Repository = "https://github.com/irfanzulkifle/oneil-canslim-screener"
+
+[tool.setuptools]
+packages = ["oneil"]
+
+[tool.setuptools.dynamic]
+version = { attr = "oneil.__version__" }

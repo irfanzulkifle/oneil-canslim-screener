@@ -19,6 +19,18 @@ scan, and where the deployed code has drifted from this specification, the
 drift is listed in [Production vs this repository](#production-vs-this-repository)
 rather than smoothed over. A screen you cannot audit is a rumour.
 
+## Live dashboard
+
+The production screen runs daily and is published at
+**[TITAN CAN SLIM Dashboard](https://oneilscreener.duckdns.org)**.
+
+Be clear about which numbers are which. Every number produced by this repository
+is **synthetic demo data**: `oneil/synthetic.py` generates deterministic bars
+locally, so the tests and `run_demo.py` need no network and no vendor feed. The
+dashboard is a separate deployment and runs on **real market data**. A rank you
+see there cannot be reproduced from the demo universe here, and a rank produced
+here is not a market observation.
+
 ---
 
 ## What "passing" means, stage by stage

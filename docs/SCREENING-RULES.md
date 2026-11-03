@@ -204,7 +204,8 @@ lineup and only shows up months later as "why did this never appear".
 | Rule | Fails | Passes |
 |---|---|---|
 | C / A EPS growth | 25.0% | 25.1% |
-| N distance from high | −15.1% | −15.0% |
+| N distance from high (daily screen) | −15.1% | −15.0% |
+| N distance from high (weekly gate) | −10.1% | −10.0% |
 | Weekly RSI gate | 60.0 | 60.1 |
 | Weekly L score band | 54.9 or 85.1 | 55.0 … 85.0 |
 | M relative volume | 1.00 | 1.01 |

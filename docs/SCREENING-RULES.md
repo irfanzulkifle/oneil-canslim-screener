@@ -6,7 +6,7 @@ satisfy to survive to the end. The numbers are constants in
 enforces them. When the two disagree, the code is right and this file is a bug.
 
 ```
-universe filter      stocks only · cap ≥ $300M · top 500 by volume
+universe filter      stocks only · cap ≥ $500M · top 500 by volume
    ↓
 weekly O'Neil gate   close > 10W SMA · close > 30W SMA · weekly RSI(7) > 60
    ↓
@@ -30,14 +30,16 @@ Applied in the vendor query, before any scoring.
 
 | Filter | Value | Why |
 |---|---|---|
-| Market capitalisation | ≥ $300,000,000 | Below this, spreads widen and one order moves the price. The volume checks also stop being meaningful. |
+| Market capitalisation | ≥ $500,000,000 | Below this, spreads widen and one order moves the price. The volume checks also stop being meaningful. Production's deployed wrapper passes 500M even though the library default is 300M; the 2026-11-03 scan's smallest name was $556M, so 500M is the operative floor. |
 | Instrument type | `stock` | Excludes ETFs, funds and trusts. A sector ETF passing CAN SLIM says nothing about a tradeable company. |
 | Order | Volume, descending | The scan returns a bounded slice. Ranking by liquidity first makes the slice the tradeable part of the market, not an alphabetical cut. |
 | Slice size | 500 per market (300 weekly) | Free-tier call budget. The chart audit is capped anyway, so a larger slice does not improve the lineup. |
 | Markets | US (~12,000 listed), Bursa (~1,100) | Two taxonomies, same rules, different universe call. |
 
-In the production database the tradeable US universe is 7,612 tickers with a
-known market cap.
+In the production database the universe table holds **7,612 rows**, of which
+**5,149** have a known market cap and **2,805** clear the $500M floor. Quoting
+7,612 as "the tradeable universe" is a row count pretending to be a screen
+result.
 
 ---
 
@@ -55,8 +57,36 @@ short. It runs in a single batched query and asks nothing about the business:
 | Market cap | ≥ $1,000,000,000 | Higher than the daily floor: this list feeds trade candidates |
 | Instrument | `stock` | As above |
 
-On 2026-11-03 this returned **113 US names and 28 Malaysian** names from the
-7,612-ticker universe.
+On 2026-11-03 the weekly table ended with **113 US names and 28 Malaysian**
+names. Those counts are the *scored* survivors, not the raw trend-gate output:
+the table only stores names that clear the trend query and then score at least
+3 of 5 on the weekly factors below. The intermediate count was never persisted,
+so do not quote 113 as "names above their 10 and 30-week averages".
+
+### The five weekly factors
+
+```
+W_total = C_score + A_score + clip(pct_above_10w, 0, 30)/10 + M_score + RSI7/50
+W_passes = count(C, A, N, L, M)
+```
+
+| Factor | Pass rule |
+|---|---|
+| C | quarterly EPS YoY **> 25%** |
+| A | annual EPS YoY **> 25%** |
+| N | within **10%** of the 52-week high |
+| L | above both weekly SMAs, weekly RSI(7) between **55 and 85** |
+| M | weekly relative volume **> 1.0** |
+
+The N threshold is 10% here and 15% on the daily screen. That is deliberate: the
+weekly list is the trade list, so it demands a tighter base. `W_total` is a
+sorting score in the low twenties, not a 0–5 count; a comment in the production
+`gate_rules.py` calls it 0–5 and is wrong.
+
+Weekly volume dry-up is also its own rule: the last completed week's volume
+below 60% of the 10-week average, with the in-progress week's stub bar dropped
+before the ratio is computed. Without that drop, a Tuesday "week" shows a
+0.10–0.30 ratio and every name looks like it is drying up.
 
 Deliberate consequence: weekly RSI 91 passes. The gate is a trend question, not
 a valuation question. Extension is handled where it belongs, by the L factor's
@@ -183,7 +213,7 @@ question: **is today a day to buy anything?**
 
 | Leg | Rule | Effect |
 |---|---|---|
-| VIX | ≤ 20 | Above 20: halt |
+| VIX | strictly **< 20** | At or above 20: halt. 20.00 is a halt, not a pass. |
 | 10Y rate shock | no rise ≥ **25bp** over 10 sessions | Shock: halt |
 | 10Y level | > 4.60% | High but stable: half position size, not a ban |
 | Missing data in any leg | — | No verdict. A blank leg is not a pass |
@@ -231,6 +261,32 @@ table records the scan date, so this is checkable rather than assumed.
 
 The chart audit is measured against today's price. Screening last week's
 fundamentals against today's chart produces a lineup that was never testable.
+
+---
+
+## Deployed system: known deviations
+
+This document describes the rule set as specified and implemented in `oneil/`.
+The private TITAN system that runs it daily has drifted in eight places. They
+are listed because a spec that quietly describes something else is worse than no
+spec.
+
+| # | Area | This repo | Deployed | Evidence |
+|---|---|---|---|---|
+| 1 | Universe floor | $500M | 500M via wrapper, 300M library default | `tv-scan:12`, `canslim_tv.py:57` |
+| 2 | Screener factors | 6 (C/A/N/L/I/M) | 5 proxies re-derived from aggregate scores; M missing, reachable rank max **5.5** | `canslim_pipeline.py:406-412` |
+| 3 | Rank floor | applied at rank time | 4.0 is a deploy gate only; 13/15 stored rows on 2026-11-03 < 4.0, min 2.7 | `gate_rules.py:83` |
+| 4 | Unauditable names | excluded, counted | zero written and persisted | `canslim_pipeline.py:460-476` |
+| 5 | Bursa chart | computed | flat 3/5, free +1.2 rank | `canslim_pipeline.py:112` |
+| 6 | 10Y level halt | replaced by shock rule | shock rule in `gate_rules`, but `gate_panel` still halts above 4.80 and the stricter leg rules | `gate_panel.py:45,128,329` |
+| 7 | Weekly regime dock | none | ±1.0 BULLISH / −1.5 BEARISH on every weekly pick | `weekly_pipeline.py:344-345` |
+| 8 | Earnings gate | none | no new entry within 3 sessions of earnings, fail-open | `earnings_filter.py:70,137` |
+
+Two more: the freshness test that blocks a *deployment* is 30 hours on
+`canslim_results.fetched_at`; the 3-day test applies to the scan itself. And the
+weekly scoring bonuses lift the achieved factor maximums above the clip values
+(C 2.0, A 2.5, N 2.0, L 2.5, I 2.3, M 3.3), so "capped 0–2" is only true of the
+base term.
 
 ---
 

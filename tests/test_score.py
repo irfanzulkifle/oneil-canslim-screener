@@ -96,6 +96,13 @@ def test_vix_above_twenty_halts():
     assert state.can_deploy is False
 
 
+def test_vix_exactly_twenty_halts():
+    # Production uses a strict "< 20" to pass; 20.00 is a halt, not a pass.
+    state = score.deploy_gate(flat(4.10, 11), vix=20.0)
+    assert state.tier == "HALT"
+    assert state.can_deploy is False
+
+
 def test_blank_leg_is_not_a_pass():
     state = score.deploy_gate([], vix=None)
     assert state.can_deploy is False

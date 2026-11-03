@@ -19,6 +19,7 @@ class Funnel:
     weekly_gate: int = 0
     fundamentals: int = 0
     chart_audited: int = 0
+    unaudited: int = 0
     above_min_rank: int = 0
 
     def pct(self, stage: str) -> str:
@@ -48,8 +49,15 @@ def screen(
     candidates: Iterable[dict],
     min_screener: int = rules.MIN_SCREENER_PASSES,
     min_rank: float | None = None,
+    allow_unaudited: bool = False,
 ) -> tuple[list[Result], Funnel]:
     """Run one screening pass.
+
+    A candidate whose bars are too short to audit is counted as unaudited and
+    left out of the ranked list. It is not scored as a zero: a data gap and a
+    bad chart are different findings, and only one of them is evidence about
+    the stock. Set allow_unaudited=True to rank it with a zero instead, and say
+    so wherever the output is published.
 
     candidate = {
       "ticker", "sector", "sector_rank",
@@ -88,9 +96,14 @@ def screen(
 
         benchmark = c.get("benchmark") or {}
         audit = chart.audit(bars, benchmark)
-        if audit is not None:
+        if audit is None:
+            funnel.unaudited += 1
+            if not allow_unaudited:
+                continue
+            chart_score = 0
+        else:
             funnel.chart_audited += 1
-        chart_score = audit.score if audit else 0
+            chart_score = audit.score
 
         rank = score.final_rank(factors.passes, chart_score, c.get("sector_rank"))
         if rank < min_rank:
@@ -119,12 +132,13 @@ def funnel_report(funnel: Funnel) -> str:
     """Human-readable funnel, the same shape the daily scan prints."""
     width = max(len(s) for s in
                 ("universe", "weekly gate", "fundamentals", "chart audited",
-                 "above min rank")) + 2
+                 "unaudited (excluded)", "above min rank")) + 2
     rows = [
         ("universe", funnel.universe, "100.0%"),
         ("weekly gate", funnel.weekly_gate, funnel.pct("weekly_gate")),
         ("fundamentals", funnel.fundamentals, funnel.pct("fundamentals")),
         ("chart audited", funnel.chart_audited, funnel.pct("chart_audited")),
+        ("unaudited (excluded)", funnel.unaudited, funnel.pct("unaudited")),
         ("above min rank", funnel.above_min_rank, funnel.pct("above_min_rank")),
     ]
     lines = [f"  {'stage':<{width}}{'count':>8}{'of universe':>14}"]

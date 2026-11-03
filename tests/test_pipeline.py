@@ -37,3 +37,20 @@ def test_results_are_sorted_by_rank():
     results, _ = pipeline.screen(synthetic.demo_universe())
     ranks = [r.final_rank for r in results]
     assert ranks == sorted(ranks, reverse=True)
+
+
+def test_short_history_is_unaudited_not_scored_zero():
+    candidates = synthetic.demo_universe()
+    candidates[0]["bars"] = {k: v[:60] for k, v in candidates[0]["bars"].items()}
+    results, funnel = pipeline.screen(candidates)
+    assert funnel.unaudited == 1
+    assert "SYN-CLEAN" not in [r.ticker for r in results]
+
+
+def test_unaudited_can_be_ranked_only_on_request():
+    candidates = synthetic.demo_universe()
+    candidates[0]["bars"] = {k: v[:60] for k, v in candidates[0]["bars"].items()}
+    results, funnel = pipeline.screen(candidates, allow_unaudited=True, min_rank=0)
+    scores = {r.ticker: r.chart_score for r in results}
+    assert scores["SYN-CLEAN"] == 0
+    assert funnel.unaudited == 1

@@ -185,9 +185,9 @@ def deploy_gate(teny_series: Sequence[float] | None, vix: float | None) -> GateS
         return GateState(level, change_bp, None, "NO_DATA", 0.0, False,
                          "VIX unavailable: a blank leg is not a pass")
 
-    if vix > rules.VIX_MAX:
+    if vix >= rules.VIX_MAX:
         return GateState(level, change_bp, vix, "HALT", 0.0, False,
-                         f"VIX {vix:.2f} above {rules.VIX_MAX:.0f}")
+                         f"VIX {vix:.2f} at or above {rules.VIX_MAX:.0f}")
 
     if level is None:
         return GateState(level, change_bp, vix, "NO_DATA", 0.0, False,

@@ -14,7 +14,12 @@ from __future__ import annotations
 # --- Stage 1: universe -------------------------------------------------------
 # Daily scan floor. Below this, price and volume are too thin for a position
 # to be entered or exited without moving the tape.
-UNIVERSE_MIN_MCAP = 300_000_000
+#
+# 500M, not the 300M the library defaults to: the deployed scan wrapper passes
+# --mcap-min 500000000, and the 2026-11-03 scan's smallest name was $556M with
+# zero rows below 500M. The 300M default is dead code in production, and a
+# document that quotes it describes a scan that never ran.
+UNIVERSE_MIN_MCAP = 500_000_000
 UNIVERSE_TOP_BY_VOLUME = 500
 
 # Weekly scan floor. O'Neil's own screens are biased to liquid names; the
@@ -88,8 +93,8 @@ FINAL_RANK_CEILING = (
     6 * W_SCREENER + CHART_CHECKS * W_CHART + M_TOP_BOOST
 )  # 6.1
 
-FINAL_RANK_MIN = 4.0       # baseline quality: screen >= 5, chart >= 2
-FINAL_RANK_STRONG = 4.5    # strong: screen >= 5, chart >= 3
+FINAL_RANK_MIN = 4.0       # 6/6 + chart 1 (4.0), or 5/6 + chart 3 (4.2)
+FINAL_RANK_STRONG = 4.5    # 5/6 + chart 4 (4.6), or 6/6 + chart 2 (4.4)
 
 # --- Deploy gates -----------------------------------------------------------
 VIX_MAX = 20.0
